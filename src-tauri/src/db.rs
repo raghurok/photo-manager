@@ -1,19 +1,82 @@
 use anyhow::Result;
 use rusqlite::{Connection, params};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-pub fn db_path() -> PathBuf {
-    let app_data = std::env::var("APPDATA")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| dirs_home().join("AppData").join("Roaming"));
-    app_data.join("photo-manager").join("library.db")
+pub fn data_dir() -> PathBuf {
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+        .unwrap_or_else(|| PathBuf::from("."));
+
+    // On macOS the exe is inside MyApp.app/Contents/MacOS/.
+    // For a portable-disk layout we want data/ next to the .app, not inside it.
+    #[cfg(target_os = "macos")]
+    if exe_dir.file_name().map(|n| n == "MacOS").unwrap_or(false) {
+        if let Some(disk_root) = exe_dir
+            .parent()          // Contents/
+            .and_then(|p| p.parent()) // MyApp.app/
+            .and_then(|p| p.parent()) // directory containing the .app
+        {
+            return disk_root.to_path_buf().join("data");
+        }
+    }
+
+    exe_dir.join("data")
 }
 
-fn dirs_home() -> PathBuf {
-    std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("."))
+pub fn db_path() -> PathBuf {
+    data_dir().join("library.db")
+}
+
+/// Opens the DB read-only (no migration) and returns the library root.
+/// Used by the localfile protocol handler to avoid a per-request db::open() + migration.
+pub fn get_library_root_quick() -> String {
+    rusqlite::Connection::open_with_flags(
+        db_path(),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .ok()
+    .and_then(|c| {
+        c.query_row(
+            "SELECT value FROM config WHERE key = 'library_root'",
+            [],
+            |r| r.get(0),
+        )
+        .ok()
+    })
+    .unwrap_or_default()
+}
+
+/// Returns the persisted library root, or empty string if not yet set.
+pub fn get_library_root(conn: &Connection) -> String {
+    conn.query_row(
+        "SELECT value FROM config WHERE key = 'library_root'",
+        [],
+        |r| r.get(0),
+    ).unwrap_or_default()
+}
+
+pub fn set_library_root(conn: &Connection, root: &str) -> Result<()> {
+    conn.execute(
+        "INSERT INTO config (key, value) VALUES ('library_root', ?1)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![root],
+    )?;
+    Ok(())
+}
+
+/// Strips `root` from `abs` and normalises separators to `/` so paths are
+/// portable across Windows and macOS.
+pub fn to_relative(root: &Path, abs: &Path) -> String {
+    abs.strip_prefix(root)
+        .unwrap_or(abs)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+/// Joins `root` + `rel` into an OS-native absolute path string.
+pub fn to_absolute(root: &str, rel: &str) -> String {
+    PathBuf::from(root).join(rel).to_string_lossy().to_string()
 }
 
 pub fn open() -> Result<Connection> {
@@ -29,6 +92,8 @@ pub fn open() -> Result<Connection> {
 
 fn migrate(conn: &Connection) -> Result<()> {
     conn.execute_batch("
+        CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT);
+
         CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY);
 
         CREATE TABLE IF NOT EXISTS albums (

@@ -29,3 +29,5 @@ trash       = "4"
 glob        = "0.3"
 chrono      = { version = "0.4", features = ["serde"] }
 turbojpeg = { version = "1.4", default-features = false, features = ["cmake", "pkg-config"] }
+libheif-rs = "0.22"
+

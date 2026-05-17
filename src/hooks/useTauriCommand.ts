@@ -1,7 +1,7 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, type InvokeArgs } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-export function useTauriCommand<T>(cmd: string, args?: object, deps?: unknown[]) {
+export function useTauriCommand<T>(cmd: string, args?: InvokeArgs, deps?: unknown[]) {
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

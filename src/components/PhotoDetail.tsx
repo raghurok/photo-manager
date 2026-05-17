@@ -7,6 +7,7 @@ interface Props {
   id: number;
   onClose: () => void;
   onDelete: () => void;
+  onView: (filePath: string, mediaType: string, fileName: string) => void;
 }
 
 function fmtDate(ts: number | null): string {
@@ -20,7 +21,7 @@ function fmtSize(bytes: number): string {
   return (bytes / 1e3).toFixed(0) + " KB";
 }
 
-export default function PhotoDetail({ id, onClose, onDelete }: Props) {
+export default function PhotoDetail({ id, onClose, onDelete, onView }: Props) {
   const { data: detail, loading } = useTauriCommand<MediaDetail>("get_media_detail", { id }, [id]);
 
   async function handleDelete() {
@@ -45,17 +46,27 @@ export default function PhotoDetail({ id, onClose, onDelete }: Props) {
 
       {detail && (
         <>
-          {/* Thumbnail / preview */}
-          <div className="bg-gray-900 flex items-center justify-center" style={{ height: 200 }}>
+          {/* Thumbnail / preview — click to open full viewer */}
+          <div
+            className="bg-gray-900 flex items-center justify-center cursor-pointer relative group"
+            style={{ height: 200 }}
+            onClick={() => onView(detail.file_path, detail.media_type, detail.file_name)}
+            title={detail.media_type === "video" ? "Click to play" : "Click to view full size"}
+          >
             {detail.thumbnail_path ? (
               <img
-                src={convertFileSrc(detail.thumbnail_path)}
+                src={convertFileSrc(detail.thumbnail_path, "localfile")}
                 alt={detail.file_name}
                 className="max-w-full max-h-full object-contain"
               />
             ) : (
               <span className="text-gray-500 text-sm">{detail.media_type === "video" ? "▶ Video" : "No thumbnail"}</span>
             )}
+            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
+              <span className="text-white text-3xl opacity-0 group-hover:opacity-100 transition-opacity">
+                {detail.media_type === "video" ? "▶" : "⤢"}
+              </span>
+            </div>
           </div>
 
           <div className="p-3 space-y-3 text-sm">
@@ -97,10 +108,16 @@ export default function PhotoDetail({ id, onClose, onDelete }: Props) {
 
             <div className="flex gap-2 pt-2">
               <button
+                onClick={() => onView(detail.file_path, detail.media_type, detail.file_name)}
+                className="flex-1 py-1.5 text-xs bg-blue-700 hover:bg-blue-600 rounded text-blue-100"
+              >
+                {detail.media_type === "video" ? "▶ Play" : "View"}
+              </button>
+              <button
                 onClick={handleOpenInExplorer}
                 className="flex-1 py-1.5 text-xs bg-gray-700 hover:bg-gray-600 rounded text-gray-200"
               >
-                Open in Explorer
+                Explorer
               </button>
               <button
                 onClick={handleDelete}

@@ -67,7 +67,7 @@ fn compute_md5(path: &Path) -> Result<String> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
-fn find_sidecar(media_path: &Path) -> Option<PathBuf> {
+pub fn find_sidecar(media_path: &Path) -> Option<PathBuf> {
     let file_name = media_path.file_name()?.to_string_lossy();
     let dir = media_path.parent()?;
 
@@ -98,22 +98,22 @@ fn find_sidecar(media_path: &Path) -> Option<PathBuf> {
 }
 
 #[derive(Default)]
-struct Sidecar {
-    title: Option<String>,
-    description: Option<String>,
-    photo_taken_ts: Option<i64>,
-    creation_ts: Option<i64>,
-    latitude: Option<f64>,
-    longitude: Option<f64>,
-    altitude: Option<f64>,
-    image_views: Option<i64>,
-    google_url: Option<String>,
-    origin_type: Option<String>,
-    device_type: Option<String>,
-    people: Vec<String>,
+pub struct Sidecar {
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub photo_taken_ts: Option<i64>,
+    pub creation_ts: Option<i64>,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
+    pub altitude: Option<f64>,
+    pub image_views: Option<i64>,
+    pub google_url: Option<String>,
+    pub origin_type: Option<String>,
+    pub device_type: Option<String>,
+    pub people: Vec<String>,
 }
 
-fn parse_sidecar(path: &Path) -> Result<Sidecar> {
+pub fn parse_sidecar(path: &Path) -> Result<Sidecar> {
     let raw = fs::read_to_string(path)?;
     let v: Value = serde_json::from_str(&raw)?;
     let mut s = Sidecar::default();
@@ -250,11 +250,31 @@ fn generate_thumbnail_jpeg(data: &[u8], thumb_path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Decodes a HEIC/HEIF file into a DynamicImage. Used by both thumbnail generation
+/// and the on-demand viewer decode command.
+pub(crate) fn heic_to_dynamic_image(path: &Path) -> Result<image::DynamicImage> {
+    use libheif_rs::{ColorSpace, HeifContext, LibHeif, RgbChroma};
+    let lib = LibHeif::new();
+    let ctx = HeifContext::read_from_file(path.to_str().context("non-UTF8 path")?)?;
+    let handle = ctx.primary_image_handle()?;
+    let img = lib.decode(&handle, ColorSpace::Rgb(RgbChroma::Rgb), None)?;
+    let width = img.width() as usize;
+    let height = img.height() as usize;
+    let planes = img.planes();
+    let plane = planes.interleaved.context("HEIC decode: no interleaved plane")?;
+    let stride = plane.stride;
+    let mut pixels = Vec::with_capacity(width * height * 3);
+    for row in 0..height {
+        let start = row * stride;
+        pixels.extend_from_slice(&plane.data[start..start + width * 3]);
+    }
+    let rgb = image::RgbImage::from_raw(width as u32, height as u32, pixels)
+        .context("HEIC decode: invalid pixel buffer")?;
+    Ok(image::DynamicImage::ImageRgb8(rgb))
+}
+
 fn generate_thumbnail(media_path: &Path, hash: &str) -> Option<PathBuf> {
-    let app_data = std::env::var("APPDATA")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("."));
-    let thumb_dir = app_data.join("photo-manager").join("thumbs");
+    let thumb_dir = db::data_dir().join("thumbs");
     let _ = fs::create_dir_all(&thumb_dir);
     let thumb_path = thumb_dir.join(format!("{}.jpg", hash));
 
@@ -267,7 +287,9 @@ fn generate_thumbnail(media_path: &Path, hash: &str) -> Option<PathBuf> {
         return None;
     }
     if ext == "heic" || ext == "heif" {
-        return None;
+        return heic_to_dynamic_image(media_path).ok()
+            .and_then(|img| img.thumbnail(256, 256).save(&thumb_path).ok())
+            .map(|_| thumb_path);
     }
 
     if ext == "jpg" || ext == "jpeg" {
@@ -280,11 +302,20 @@ fn generate_thumbnail(media_path: &Path, hash: &str) -> Option<PathBuf> {
     Some(thumb_path)
 }
 
+/// Like `generate_thumbnail` but returns the path relative to `data_dir()` with
+/// forward slashes so it is portable across Windows and macOS.
+fn generate_thumbnail_rel(media_path: &Path, hash: &str) -> Option<String> {
+    let abs = generate_thumbnail(media_path, hash)?;
+    abs.strip_prefix(&db::data_dir()).ok()
+        .map(|rel| rel.to_string_lossy().replace('\\', "/"))
+}
+
 pub fn run_scan(library_path: String, progress: Arc<Progress>) -> Result<()> {
     progress.running.store(true, Ordering::SeqCst);
     *progress.phase.lock().unwrap() = "Scanning files".to_string();
 
     let mut conn = db::open()?;
+    db::set_library_root(&conn, &library_path)?;
 
     // Collect all media files first
     let mut media_files: Vec<PathBuf> = Vec::new();
@@ -318,14 +349,20 @@ pub fn run_scan(library_path: String, progress: Arc<Progress>) -> Result<()> {
             let album_dir = entry.path().parent().unwrap_or(&root);
             if let Ok(raw) = fs::read_to_string(entry.path()) {
                 if let Ok(v) = serde_json::from_str::<Value>(&raw) {
-                    let title = v["title"].as_str().unwrap_or("").to_string();
+                    let title = v["title"].as_str().filter(|t| !t.is_empty())
+                        .map(String::from)
+                        .unwrap_or_else(|| {
+                            album_dir.file_name()
+                                .map(|n| n.to_string_lossy().to_string())
+                                .unwrap_or_default()
+                        });
                     let description = v["description"].as_str().map(String::from);
                     let access = v["access"].as_str().map(String::from);
                     let date_ts = v["date"]["timestamp"].as_str().and_then(|t| t.parse::<i64>().ok());
                     let _ = db::upsert_album(
                         &conn,
-                        &album_dir.to_string_lossy(),
-                        Some(&title),
+                        &db::to_relative(&root, album_dir),
+                        if title.is_empty() { None } else { Some(title.as_str()) },
                         description.as_deref(),
                         access.as_deref(),
                         date_ts,
@@ -344,6 +381,21 @@ pub fn run_scan(library_path: String, progress: Arc<Progress>) -> Result<()> {
         progress.done.fetch_add(1, Ordering::Relaxed);
     }
 
+    // Prune records for files no longer on disk
+    *progress.phase.lock().unwrap() = "Pruning deleted files".to_string();
+    let mut stmt = conn.prepare("SELECT id, file_path FROM media")?;
+    let all_db_paths: Vec<(i64, String)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .filter_map(|r| r.ok())
+        .collect();
+    drop(stmt);
+    for (id, rel_path) in all_db_paths {
+        let abs_path = db::to_absolute(&library_path, &rel_path);
+        if !Path::new(&abs_path).exists() {
+            conn.execute("DELETE FROM media WHERE id = ?1", params![id])?;
+        }
+    }
+
     // Duplicate detection
     *progress.phase.lock().unwrap() = "Finding duplicates".to_string();
     detect_duplicates(&mut conn)?;
@@ -359,7 +411,8 @@ fn index_one_file(conn: &Connection, path: &Path, root: &Path) -> Result<()> {
     let file_name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
     let ext = path.extension().unwrap_or_default().to_string_lossy().to_lowercase().to_string();
     let media_type = classify_media_type(&ext).unwrap_or("photo").to_string();
-    let file_path = path.to_string_lossy().to_string();
+    // Store as a portable relative path (forward slashes, relative to library root)
+    let file_path = db::to_relative(root, path);
 
     // Check if already indexed and unchanged
     let existing: Option<(i64, Option<String>)> = conn.query_row(
@@ -372,7 +425,24 @@ fn index_one_file(conn: &Connection, path: &Path, root: &Path) -> Result<()> {
 
     if let Some((_, Some(ref old_hash))) = existing {
         if old_hash == &file_hash {
-            return Ok(()); // unchanged, skip
+            // File content unchanged — but if thumbnail is missing, generate it now.
+            // This handles files that were indexed before thumbnail support was added
+            // (e.g. HEIC files indexed before libheif was available).
+            let thumb_missing: bool = conn.query_row(
+                "SELECT thumbnail_path IS NULL FROM media WHERE file_path = ?1",
+                params![file_path],
+                |r| r.get(0),
+            ).unwrap_or(false);
+
+            if thumb_missing {
+                if let Some(thumb_rel) = generate_thumbnail_rel(path, &file_hash) {
+                    conn.execute(
+                        "UPDATE media SET thumbnail_path = ?1 WHERE file_path = ?2",
+                        params![thumb_rel, file_path],
+                    )?;
+                }
+            }
+            return Ok(());
         }
     }
 
@@ -384,12 +454,11 @@ fn index_one_file(conn: &Connection, path: &Path, root: &Path) -> Result<()> {
     // Parse EXIF (photos only)
     let exif = if media_type == "photo" { parse_exif(path) } else { ExifData::default() };
 
-    // Thumbnail
-    let thumb = generate_thumbnail(path, &file_hash)
-        .map(|p| p.to_string_lossy().to_string());
+    // Thumbnail — stored relative to data_dir so it survives drive-letter changes
+    let thumb_rel = generate_thumbnail_rel(path, &file_hash);
 
-    // Resolve album_id from parent directory
-    let album_dir = path.parent().unwrap_or(root).to_string_lossy().to_string();
+    // Resolve album_id from parent directory (also stored relative)
+    let album_dir = db::to_relative(root, path.parent().unwrap_or(root));
     let album_id: Option<i64> = conn.query_row(
         "SELECT id FROM albums WHERE dir_path = ?1",
         params![album_dir],
@@ -427,7 +496,7 @@ fn index_one_file(conn: &Connection, path: &Path, root: &Path) -> Result<()> {
             sidecar.latitude, sidecar.longitude, sidecar.altitude,
             sidecar.image_views, sidecar.google_url, sidecar.origin_type, sidecar.device_type,
             exif.width, exif.height, exif.camera_make, exif.camera_model, exif.date_ts,
-            album_id, thumb, now,
+            album_id, thumb_rel, now,
         ],
     )?;
 
@@ -511,3 +580,4 @@ fn detect_duplicates(conn: &mut Connection) -> Result<()> {
     tx.commit()?;
     Ok(())
 }
+

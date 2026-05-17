@@ -70,6 +70,7 @@ export interface SearchFilters {
   date_from?: number;
   date_to?: number;
   album_id?: number;
+  sort_by?: string;
   limit?: number;
   offset?: number;
 }
@@ -88,4 +89,27 @@ export interface DuplicateItem {
   thumbnail_path: string | null;
   photo_taken_ts: number | null;
   album_title: string | null;
+}
+
+export interface CleanupPreviewItem {
+  file_name: string;
+  kept_path: string;
+  deleted_paths: string[];
+  bytes_freed: number;
+}
+
+export interface CleanupResult {
+  dry_run: boolean;
+  groups_eligible: number;
+  groups_skipped: number;
+  files_deleted: number;
+  bytes_freed: number;
+  preview: CleanupPreviewItem[];
+}
+
+export interface TakeoutFixResult {
+  total_scanned: number;
+  updated: number;
+  no_sidecar: number;
+  errors: number;
 }

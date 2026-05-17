@@ -6,6 +6,13 @@ interface Props {
   onChange: (f: SearchFilters) => void;
 }
 
+const SORT_OPTIONS = [
+  { label: "Date ↓", value: "date_desc" },
+  { label: "Date ↑", value: "date_asc" },
+  { label: "Size ↓", value: "size_desc" },
+  { label: "Size ↑", value: "size_asc" },
+];
+
 const SIZE_PRESETS = [
   { label: "Any size", min: undefined, max: undefined },
   { label: "Small (<1 MB)", min: undefined, max: 1_000_000 },
@@ -25,6 +32,10 @@ export default function FilterSidebar({ filters, onChange }: Props) {
 
   function setType(t: string | undefined) {
     onChange({ ...filters, media_type: t });
+  }
+
+  function setSort(value: string) {
+    onChange({ ...filters, sort_by: value === "date_desc" ? undefined : value });
   }
 
   function setSize(min?: number, max?: number) {
@@ -54,6 +65,24 @@ export default function FilterSidebar({ filters, onChange }: Props) {
           <button onClick={clearAll} className="text-xs text-blue-400 hover:text-blue-300">Clear all</button>
         )}
       </div>
+
+      {/* Sort */}
+      <Section title="Sort">
+        <div className="grid grid-cols-2 gap-1">
+          {SORT_OPTIONS.map((opt) => {
+            const active = (filters.sort_by ?? "date_desc") === opt.value;
+            return (
+              <button
+                key={opt.value}
+                onClick={() => setSort(opt.value)}
+                className={`py-1 text-xs rounded ${active ? "bg-blue-600 text-white" : "bg-gray-700 text-gray-300 hover:bg-gray-600"}`}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+      </Section>
 
       {/* Type */}
       <Section title="Type">

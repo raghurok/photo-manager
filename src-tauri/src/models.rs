@@ -80,6 +80,7 @@ pub struct IndexProgress {
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct SearchFilters {
+    #[serde(default)]
     pub people: Vec<i64>,
     pub media_type: Option<String>,
     pub min_size_bytes: Option<i64>,
@@ -87,6 +88,7 @@ pub struct SearchFilters {
     pub date_from: Option<i64>,
     pub date_to: Option<i64>,
     pub album_id: Option<i64>,
+    pub sort_by: Option<String>,
     pub limit: Option<i64>,
     pub offset: Option<i64>,
 }
@@ -107,4 +109,30 @@ pub struct DuplicateItem {
     pub thumbnail_path: Option<String>,
     pub photo_taken_ts: Option<i64>,
     pub album_title: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CleanupPreviewItem {
+    pub file_name: String,
+    pub kept_path: String,
+    pub deleted_paths: Vec<String>,
+    pub bytes_freed: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CleanupResult {
+    pub dry_run: bool,
+    pub groups_eligible: i64,
+    pub groups_skipped: i64,
+    pub files_deleted: i64,
+    pub bytes_freed: i64,
+    pub preview: Vec<CleanupPreviewItem>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct TakeoutFixResult {
+    pub total_scanned: i64,
+    pub updated: i64,
+    pub no_sidecar: i64,
+    pub errors: i64,
 }
