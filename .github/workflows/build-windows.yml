@@ -29,24 +29,11 @@ jobs:
         uses: pnpm/action-setup@v4
         with:
           version: 9
-          run_install: false
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
-
-      - name: Get pnpm store path
-        id: pnpm-cache
-        shell: bash
-        run: echo "store=$(pnpm store path)" >> $GITHUB_OUTPUT
-
-      - name: Cache pnpm store
-        uses: actions/cache@v4
-        with:
-          path: ${{ steps.pnpm-cache.outputs.store }}
-          key: windows-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: windows-pnpm-
 
       - name: Install frontend dependencies
         run: pnpm install
