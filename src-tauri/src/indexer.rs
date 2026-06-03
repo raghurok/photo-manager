@@ -116,10 +116,11 @@ pub struct Sidecar {
 pub fn parse_sidecar(path: &Path) -> Result<Sidecar> {
     let raw = fs::read_to_string(path)?;
     let v: Value = serde_json::from_str(&raw)?;
-    let mut s = Sidecar::default();
-
-    s.title = v["title"].as_str().map(String::from).filter(|t| !t.is_empty());
-    s.description = v["description"].as_str().map(String::from).filter(|d| !d.is_empty());
+    let mut s = Sidecar {
+        title: v["title"].as_str().map(String::from).filter(|t| !t.is_empty()),
+        description: v["description"].as_str().map(String::from).filter(|d| !d.is_empty()),
+        ..Default::default()
+    };
 
     if let Some(ts) = v["photoTakenTime"]["timestamp"].as_str() {
         s.photo_taken_ts = ts.parse::<i64>().ok();
@@ -306,7 +307,7 @@ fn generate_thumbnail(media_path: &Path, hash: &str) -> Option<PathBuf> {
 /// forward slashes so it is portable across Windows and macOS.
 fn generate_thumbnail_rel(media_path: &Path, hash: &str) -> Option<String> {
     let abs = generate_thumbnail(media_path, hash)?;
-    abs.strip_prefix(&db::data_dir()).ok()
+    abs.strip_prefix(db::data_dir()).ok()
         .map(|rel| rel.to_string_lossy().replace('\\', "/"))
 }
 
