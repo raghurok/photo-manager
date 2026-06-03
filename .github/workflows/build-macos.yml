@@ -12,10 +12,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust (stable, universal targets)
+      - name: Install Rust (stable)
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
 
       - name: Cache Rust build
         uses: actions/cache@v4
@@ -27,6 +25,9 @@ jobs:
           key: macos-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
           restore-keys: macos-cargo-
 
+      - name: Install libheif
+        run: brew install libheif
+
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -37,20 +38,17 @@ jobs:
         with:
           node-version: 24
 
-      - name: Install libheif
-        run: brew install libheif
-
       - name: Install frontend dependencies
         run: pnpm install
 
-      - name: Build universal app
-        run: pnpm tauri build --target universal-apple-darwin
+      - name: Build app (arm64)
+        run: pnpm tauri build
         env:
-          PKG_CONFIG_PATH: /opt/homebrew/lib/pkgconfig:/usr/local/lib/pkgconfig
+          PKG_CONFIG_PATH: /opt/homebrew/lib/pkgconfig
 
       - name: Upload DMG
         uses: actions/upload-artifact@v4
         with:
-          name: photo-manager-macos-universal
-          path: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          name: photo-manager-macos-arm64
+          path: src-tauri/target/release/bundle/dmg/*.dmg
           if-no-files-found: error

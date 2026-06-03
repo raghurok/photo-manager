@@ -20,6 +20,19 @@ pnpm build   # runs tsc && vite build
 
 There are no automated tests in this project.
 
+## CI
+
+Two GitHub Actions workflows build release artifacts on every push to `main`:
+
+| Workflow | Runner | Output |
+|---|---|---|
+| `build-windows.yml` | `windows-latest` | `.msi` installer (x64) |
+| `build-macos.yml` | `macos-latest` (ARM64) | `.dmg` (arm64 only — universal build dropped due to libheif cross-compilation limitations) |
+
+**libheif on Windows CI**: `libheif-sys` requires vcpkg. The workflow installs `libheif:x64-windows-static-md` via the runner's pre-installed vcpkg (`C:\vcpkg`) and passes `VCPKG_ROOT` + `VCPKGRS_TRIPLET` to the Rust build. `C:\vcpkg\installed` is cached to avoid recompiling on every run.
+
+**pnpm workspace**: `pnpm-workspace.yaml` must keep `packages: ['.']` — without it pnpm errors with `packages field missing or empty` during install.
+
 ## Architecture
 
 This is a **Tauri v2** desktop app (Windows-first). The frontend is React + TypeScript + Tailwind, served by Vite. The backend is Rust.
@@ -47,7 +60,7 @@ Plugin commands (e.g., `dialog:allow-open`, `shell:allow-open`) also require ent
 
 **Database**: SQLite at `%APPDATA%\photo-manager\library.db`, WAL mode. Schema is applied idempotently in `db::migrate` on every `db::open()` call — no migration versioning. Each command opens its own connection (no connection pool).
 
-**Thumbnails**: Written to `%APPDATA%\photo-manager\thumbs\<md5>.jpg`, 256×256. HEIC/HEIF and video thumbnails are skipped. Thumbnails are served to the frontend via Tauri's asset protocol (`convertFileSrc`).
+**Thumbnails**: Written to `%APPDATA%\photo-manager\thumbs\<md5>.jpg`, 256×256. HEIC/HEIF files are decoded via `libheif-rs` (`indexer::heic_to_dynamic_image`) before resizing. Video thumbnails are skipped. Thumbnails are served to the frontend via Tauri's asset protocol (`convertFileSrc`).
 
 **Duplicate detection** runs at the end of every scan. Phase 1: exact MD5 hash matches. Phase 2: EXIF fingerprint (same timestamp + camera make + dimensions).
 
