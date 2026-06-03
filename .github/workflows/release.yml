@@ -1,0 +1,124 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: windows-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: windows-cargo-
+
+      - name: Cache vcpkg packages
+        uses: actions/cache@v4
+        with:
+          path: C:\vcpkg\installed
+          key: vcpkg-windows-libheif
+          restore-keys: vcpkg-windows-
+
+      - name: Install libheif via vcpkg
+        run: vcpkg install libheif:x64-windows-static-md
+        env:
+          VCPKG_DEFAULT_TRIPLET: x64-windows-static-md
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - run: pnpm install
+
+      - name: Build MSI
+        run: pnpm tauri build
+        env:
+          VCPKG_ROOT: C:\vcpkg
+          VCPKGRS_TRIPLET: x64-windows-static-md
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-msi
+          path: src-tauri/target/release/bundle/msi/*.msi
+          if-no-files-found: error
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: macos-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: macos-cargo-
+
+      - name: Install libheif
+        run: brew install libheif
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - run: pnpm install
+
+      - name: Build app (arm64)
+        run: pnpm tauri build
+        env:
+          PKG_CONFIG_PATH: /opt/homebrew/lib/pkgconfig
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg
+          path: src-tauri/target/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+
+  publish:
+    needs: [build-windows, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-msi
+          path: artifacts/windows
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-dmg
+          path: artifacts/macos
+
+      - name: Create draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: |
+            artifacts/windows/*.msi
+            artifacts/macos/*.dmg
