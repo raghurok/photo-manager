@@ -123,5 +123,5 @@ jobs:
         with:
           draft: true
           files: |
-            artifacts/windows/*.msi
+            artifacts/windows/*.exe
             artifacts/macos/*.dmg
